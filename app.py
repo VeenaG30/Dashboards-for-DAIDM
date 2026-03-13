@@ -69,7 +69,7 @@ st.markdown(insights_css, unsafe_allow_html=True)
 # Load data
 @st.cache_data
 def load_data():
-    df = pd.read_csv("Supply-Chain-Disruptions-Inventory.csv")
+    df = pd.read_csv("data.csv")
     df['Date'] = pd.to_datetime(df['Date'])
     return df
 
