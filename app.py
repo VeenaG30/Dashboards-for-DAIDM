@@ -1,4 +1,4 @@
-# app.py - Enhanced Supply Chain Analytics Dashboard
+# app.py - Supply Chain Analytics Dashboard
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -34,6 +34,7 @@ def generate_enhanced_data():
     }
     
     df = pd.DataFrame(data)
+    df['Date'] = pd.to_datetime(df['Date'])  # Ensure datetime
     df['Delivery_Delay'] = df['Delivery_Delay'].clip(0, 20)
     df['Lead_Time'] = df['Lead_Time'].clip(2, 25)
     df['Lost_Sales_Cost'] = df['Lost_Sales_Cost'].clip(0, 50000)
@@ -43,7 +44,7 @@ def generate_enhanced_data():
     
     return df
 
-# Advanced analytics functions
+# Fixed analytics functions
 @st.cache_data
 def detect_anomalies(df):
     anomalies = []
@@ -55,7 +56,9 @@ def detect_anomalies(df):
         upper = Q3 + 1.5 * IQR
         outliers = df[(df[col] > upper) & (df['Disruption_Type'] != 'None')]
         anomalies.append(outliers)
-    return pd.concat(anomalies).drop_duplicates().sort_values('Date').head(15)
+    if anomalies:
+        return pd.concat(anomalies).drop_duplicates().sort_values('Date').head(15)
+    return pd.DataFrame()
 
 @st.cache_data
 def supplier_performance(df):
@@ -66,17 +69,19 @@ def supplier_performance(df):
         'Product_ID': 'count'
     }).round(3)
     perf.columns = ['OTIF_Rate', 'Avg_Delay', 'Avg_Cost', 'Shipments']
+    perf = perf.reset_index()
     perf['OTIF_Rate_%'] = (perf['OTIF_Rate'] * 100).round(1)
     return perf.sort_values('OTIF_Rate', ascending=False)
 
 @st.cache_data
 def abc_analysis(df):
-    sku_demand = df.groupby('Product_ID')['Actual_Demand'].sum().sort_values(ascending=False)
-    sku_demand = sku_demand / sku_demand.sum()
-    sku_demand_cum = sku_demand.cumsum()
-    sku_demand['ABC'] = np.where(sku_demand_cum <= 0.8, 'A', 
-                                np.where(sku_demand_cum <= 0.95, 'B', 'C'))
-    return sku_demand.reset_index()
+    # FIXED: Return proper DataFrame with numeric columns
+    sku_demand = df.groupby('Product_ID')['Actual_Demand'].sum().sort_values(ascending=False).reset_index()
+    sku_demand['CumPct'] = sku_demand['Actual_Demand'] / sku_demand['Actual_Demand'].sum()
+    sku_demand['CumPct'] = sku_demand['CumPct'].cumsum()
+    sku_demand['ABC'] = np.where(sku_demand['CumPct'] <= 0.8, 'A', 
+                                np.where(sku_demand['CumPct'] <= 0.95, 'B', 'C'))
+    return sku_demand
 
 # Load data
 df = generate_enhanced_data()
@@ -106,13 +111,14 @@ df_filtered = df[
     (df['Region'].isin(region))
 ].reset_index(drop=True)
 
-# Apply scenario
+# Apply scenario (on copy to avoid modifying original)
+df_scenario = df_filtered.copy()
 if scenario == "High Delay":
-    df_filtered['Delivery_Delay'] *= 2
+    df_scenario['Delivery_Delay'] *= 2
 elif scenario == "Demand Surge":
-    df_filtered['Actual_Demand'] *= 1.3
+    df_scenario['Actual_Demand'] *= 1.3
 elif scenario == "Cost Crisis":
-    df_filtered['Total_Cost'] *= 1.5
+    df_scenario['Total_Cost'] *= 1.5
 
 # Main Dashboard
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "🚨 Risk Alerts", "🏭 Supplier Perf", "📦 Inventory", "💰 Cost Analysis"])
@@ -122,101 +128,19 @@ with tab1:
     st.subheader("**Executive KPIs**")
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
-    col1.metric("Fill Rate", f"{df_filtered['Fill_Rate'].mean():.1f}%", 
-                delta=f"{df_filtered['Fill_Rate'].std():.1f}% σ")
-    col2.metric("OTIF", f"{df_filtered['OTIF'].mean():.1%}", 
-                delta=f"+{((df_filtered['OTIF'].mean()*100)-95):+.1f}% vs target")
-    col3.metric("Total Cost", f"${df_filtered['Total_Cost'].sum():,.0f}", 
-                f"${df_filtered['Total_Cost'].mean():,.0f} avg")
-    col4.metric("Avg Delay", f"{df_filtered['Delivery_Delay'].mean():.1f} days")
-    col5.metric("DIO", f"{df_filtered['DIO'].mean():.0f} days")
-    col6.metric("Shipments", f"{len(df_filtered):,}")
+    col1.metric("Fill Rate", f"{df_scenario['Fill_Rate'].mean():.1f}%", 
+                delta=f"{df_scenario['Fill_Rate'].std():.1f}% σ")
+    col2.metric("OTIF", f"{df_scenario['OTIF'].mean():.1%}", 
+                delta=f"+{((df_scenario['OTIF'].mean()*100)-95):+.1f}% vs target")
+    col3.metric("Total Cost", f"${df_scenario['Total_Cost'].sum():,.0f}", 
+                f"${df_scenario['Total_Cost'].mean():,.0f} avg")
+    col4.metric("Avg Delay", f"{df_scenario['Delivery_Delay'].mean():.1f} days")
+    col5.metric("DIO", f"{df_scenario['DIO'].mean():.0f} days")
+    col6.metric("Shipments", f"{len(df_scenario):,}")
     
     st.markdown("---")
     
     col_a, col_b = st.columns(2)
     with col_a:
-        trend_data = df_filtered.groupby(df_filtered['Date'].dt.to_period('M').astype(str))['Total_Cost'].sum()
-        fig_trend = px.line(trend_data.reset_index(), x='Date', y='Total_Cost',
-                           title="Monthly Cost Trend", markers=True)
-        st.plotly_chart(fig_trend, use_container_width=True)
-    
-    with col_b:
-        cost_pie = df_filtered[['Lost_Sales_Cost', 'Transportation_Cost', 'Inventory_Holding_Cost']].sum()
-        fig_pie = px.pie(values=cost_pie.values, names=cost_pie.index,
-                        title="Cost Breakdown")
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-# Tab 2: Risk & Anomalies
-with tab2:
-    st.subheader("🚨 **High-Risk Events & Anomalies**")
-    anomalies = detect_anomalies(df_filtered)
-    
-    if not anomalies.empty:
-        col1, col2 = st.columns([3,1])
-        with col1:
-            st.dataframe(anomalies[['Date', 'Product_ID', 'Supplier_ID', 'Delivery_Delay', 
-                                  'Total_Cost', 'Disruption_Type']], use_container_width=True)
-        with col2:
-            st.metric("🚨 Anomalies", len(anomalies), delta=f"{len(anomalies)/len(df_filtered)*100:.1f}% of shipments")
-    else:
-        st.success("✅ No significant anomalies detected")
-
-# Tab 3: Supplier Performance
-with tab3:
-    st.subheader("🏭 **Supplier Performance Ranking**")
-    supplier_perf = supplier_performance(df_filtered)
-    
-    st.dataframe(supplier_perf, use_container_width=True)
-    
-    fig_supplier = px.scatter(supplier_perf.reset_index(), 
-                            x='Avg_Delay', y='OTIF_Rate_%', size='Shipments', color='Avg_Cost',
-                            hover_name='Supplier_ID', title="Supplier Performance Matrix")
-    st.plotly_chart(fig_supplier, use_container_width=True)
-
-# Tab 4: Inventory & ABC Analysis
-with tab4:
-    st.subheader("📦 **Inventory Analytics**")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        abc = abc_analysis(df_filtered)
-        fig_abc = px.bar(abc.head(15), x='Product_ID', y='Actual_Demand',
-                        title="Top 15 SKUs - ABC Analysis", color='ABC')
-        st.plotly_chart(fig_abc, use_container_width=True)
-    
-    with col2:
-        dio_by_category = df_filtered.groupby('Product_Category')['DIO'].mean().sort_values()
-        fig_dio = px.bar(dio_by_category.reset_index(), x='Product_Category', y='DIO',
-                        title="Days Inventory Outstanding by Category")
-        st.plotly_chart(fig_dio, use_container_width=True)
-
-# Tab 5: Cost Analysis
-with tab5:
-    st.subheader("💰 **Cost Structure Analysis**")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        cost_by_region = df_filtered.groupby('Region')['Total_Cost'].sum().sort_values()
-        fig_region = px.bar(cost_by_region.reset_index(), x='Region', y='Total_Cost',
-                          title="Total Cost by Region", color='Total_Cost')
-        st.plotly_chart(fig_region, use_container_width=True)
-    
-    with col2:
-        cost_by_mode = df_filtered.groupby('Transportation_Mode')['Transportation_Cost'].sum()
-        fig_mode = px.pie(values=cost_by_mode.values, names=cost_by_mode.index,
-                         title="Transport Cost by Mode")
-        st.plotly_chart(fig_mode, use_container_width=True)
-
-# Footer
-st.markdown("---")
-with st.container():
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**🚚 Supply Chain Pro Analytics**")
-    with col2:
-        st.markdown("*Enhanced with time intelligence, supplier tracking, ABC analysis*")
-    with col3:
-        st.markdown(f"**Data: {len(df_filtered):,} records | {scenario} scenario**")
-
-st.markdown("---")
+        trend_data = df_scenario.groupby(df_scenario['Date'].dt.to_period('M').astype(str))['Total_Cost'].sum().reset_index()
+        trend_data.columns
