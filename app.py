@@ -1,7 +1,7 @@
 """
-🚀 SUPPLY CHAIN DASHBOARD - PLOTLY JSON ERROR FIXED
-✅ No Period objects in plots
-✅ All dates properly converted
+🚀 SUPPLY CHAIN DASHBOARD - KEYERROR FIXED
+✅ Month_Year created AFTER filtering
+✅ No more column missing errors
 ✅ Tabs + Filters + Insights PERFECT
 """
 
@@ -27,7 +27,7 @@ st.markdown("""
 @st.cache_data
 def generate_supply_chain_data():
     np.random.seed(42)
-    n_records = 5000  # Reduced for performance
+    n_records = 5000
     
     products = ['SKU-'+str(i).zfill(4) for i in range(1, 301)]
     customers = ['CUST-'+str(i).zfill(4) for i in range(1, 51)]
@@ -48,7 +48,6 @@ def generate_supply_chain_data():
     
     df = pd.DataFrame(data)
     df['Actual_Demand'] = df['Actual_Demand'].clip(0)
-    df['Month_Year'] = df['Date'].dt.to_period('M').astype(str)  # Convert to STRING for Plotly
     return df
 
 @st.cache_data
@@ -60,7 +59,8 @@ def load_data():
 def abc_analysis(df):
     demand_summary = df.groupby('Product_ID', as_index=False)['Actual_Demand'].sum()
     demand_summary = demand_summary.sort_values('Actual_Demand', ascending=False)
-    demand_summary['Cumulative_Percent'] = demand_summary['Actual_Demand'].cumsum() / demand_summary['Actual_Demand'].sum()
+    total_demand = demand_summary['Actual_Demand'].sum()
+    demand_summary['Cumulative_Percent'] = demand_summary['Actual_Demand'].cumsum() / total_demand
     demand_summary['ABC'] = pd.cut(demand_summary['Cumulative_Percent'], 
                                    bins=[0, 0.7, 0.9, 1], labels=['A', 'B', 'C'])
     return demand_summary
@@ -93,7 +93,7 @@ with col2:
 with col3:
     status_filter = st.multiselect("✅ Status", options=sorted(df['Delivery_Status'].unique()), default=sorted(df['Delivery_Status'].unique()))
 
-# Apply filters
+# Apply filters FIRST
 mask = (
     (df['Date'] >= pd.to_datetime(date_range[0])) &
     (df['Date'] <= pd.to_datetime(date_range[1])) &
@@ -101,6 +101,9 @@ mask = (
     (df['Delivery_Status'].isin(status_filter))
 )
 df_filtered = df[mask].copy()
+
+# ✅ FIXED: Create Month_Year AFTER filtering
+df_filtered['Month_Year'] = df_filtered['Date'].dt.strftime('%Y-%m')
 
 # === TAB 1: OVERVIEW ===
 with tab1:
@@ -125,19 +128,19 @@ with tab1:
     
     with col_b:
         fig_lead = px.histogram(df_filtered, x='Lead_Time_Days', nbins=20, 
-                              color='Delivery_Status', title="⏰ Lead Time Distribution")
+                              color='Delivery_Status', title="⏰ Lead Times")
         fig_lead.update_layout(height=350)
         st.plotly_chart(fig_lead, use_container_width=True)
     
     # INSIGHTS
-    a_class_pct = (abc['ABC'] == 'A').sum()
+    a_class_count = len(abc[abc['ABC'] == 'A'])
     st.markdown(f"""
     <div class="insight-box">
         <h3>💡 Actionable Insights</h3>
         <ul>
-            <li><strong>{a_class_pct}</strong> A-Class SKUs drive 70%+ of demand</li>
-            <li>On-time delivery: <strong>{kpis["on_time_rate"]:.1f}%</strong></li>
-            <li>Avg lead time: <strong>{kpis["avg_lead_time"]:.1f}</strong> days</li>
+            <li><strong>{a_class_count}</strong> A-Class SKUs (70%+ demand)</li>
+            <li>On-time: <strong>{kpis["on_time_rate"]:.1f}%</strong></li>
+            <li>Lead time: <strong>{kpis["avg_lead_time"]:.1f}</strong> days</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -148,19 +151,18 @@ with tab2:
     
     col1, col2 = st.columns(2)
     with col1:
-        # FIXED: Use Date directly (datetime), not Period
         demand_daily = df_filtered.groupby(df_filtered['Date'].dt.date)['Actual_Demand'].sum().reset_index()
         demand_daily['Date'] = pd.to_datetime(demand_daily['Date'])
-        fig_trend = px.line(demand_daily, x='Date', y='Actual_Demand', title="📈 Daily Demand Trend")
+        fig_trend = px.line(demand_daily, x='Date', y='Actual_Demand', title="📈 Daily Demand")
         fig_trend.update_layout(height=350)
         st.plotly_chart(fig_trend, use_container_width=True)
     
     with col2:
-        # FIXED: Convert Month_Year (string) properly
+        # ✅ FIXED: Month_Year exists now!
         demand_monthly = df_filtered.groupby('Month_Year')['Actual_Demand'].sum().reset_index()
         demand_monthly['Month_Year'] = pd.to_datetime(demand_monthly['Month_Year'] + '-01')
         fig_monthly = px.bar(demand_monthly, x='Month_Year', y='Actual_Demand', title="📊 Monthly Demand")
-        fig_monthly.update_layout(height=350)
+        fig_monthly.update_layout(height=350, xaxis_tickangle=-45)
         st.plotly_chart(fig_monthly, use_container_width=True)
     
     # INSIGHTS
@@ -169,16 +171,16 @@ with tab2:
     <div class="insight-box">
         <h3>💡 Demand Insights</h3>
         <ul>
-            <li>Recent 30-day avg: <strong>{recent_avg:.0f}</strong> units/day</li>
-            <li>Plan inventory for <strong>{recent_avg*7:.0f}</strong> weekly demand</li>
-            <li>Monitor monthly seasonality patterns</li>
+            <li>Recent avg: <strong>{recent_avg:.0f}</strong> units/day</li>
+            <li>Weekly forecast: <strong>{recent_avg*7:.0f}</strong> units</li>
+            <li>Monitor monthly seasonality</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
 
 # === TAB 3: OPERATIONS ===
 with tab3:
-    st.header("🚚 Operations Performance")
+    st.header("🚚 Operations")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -192,22 +194,23 @@ with tab3:
         st.plotly_chart(fig_region, use_container_width=True)
     
     with col2:
-        fig_pie = px.pie(df_filtered, names='Delivery_Status', title="📋 Status Distribution")
+        fig_pie = px.pie(df_filtered, names='Delivery_Status', title="📋 Status Breakdown")
         st.plotly_chart(fig_pie, use_container_width=True)
     
     # INSIGHTS
-    top_region = region_stats.loc[region_stats['Actual_Demand'].idxmax(), 'Region']
-    delayed_pct = (df_filtered['Delivery_Status'] == 'Delayed').mean() * 100
-    st.markdown(f"""
-    <div class="insight-box">
-        <h3>💡 Operations Insights</h3>
-        <ul>
-            <li><strong>{top_region}</strong>: Highest demand region</li>
-            <li><strong>{delayed_pct:.1f}%</strong> delayed orders</li>
-            <li>Focus capacity planning on peak regions</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
+    if len(region_stats) > 0:
+        top_region = region_stats.loc[region_stats['Actual_Demand'].idxmax(), 'Region']
+        delayed_pct = (df_filtered['Delivery_Status'] == 'Delayed').mean() * 100
+        st.markdown(f"""
+        <div class="insight-box">
+            <h3>💡 Operations Insights</h3>
+            <ul>
+                <li><strong>{top_region}</strong>: Top demand region</li>
+                <li><strong>{delayed_pct:.1f}%</strong> delayed orders</li>
+                <li>Optimize capacity in peak regions</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
 
 # === TAB 4: FINANCE ===
 with tab4:
@@ -215,18 +218,17 @@ with tab4:
     
     col1, col2 = st.columns(2)
     with col1:
-        fig_scatter = px.scatter(df_filtered.sample(1000), x='Actual_Demand', y='Order_Value', 
+        sample_data = df_filtered.sample(min(1000, len(df_filtered)))
+        fig_scatter = px.scatter(sample_data, x='Actual_Demand', y='Order_Value', 
                                color='Region', size='Lead_Time_Days', 
-                               title="💵 Demand vs Order Value",
-                               hover_data=['Product_ID'])
+                               title="💵 Demand vs Order Value")
         fig_scatter.update_layout(height=350)
         st.plotly_chart(fig_scatter, use_container_width=True)
     
     with col2:
-        # FIXED: Simple numeric correlations only
         corr_cols = ['Actual_Demand', 'Lead_Time_Days', 'Order_Value']
         corr_data = df_filtered[corr_cols].corr()
-        fig_corr = px.imshow(corr_data, title="🔗 Key Correlations", 
+        fig_corr = px.imshow(corr_data, title="🔗 Correlations", 
                            color_continuous_scale='RdBu_r', aspect="auto")
         fig_corr.update_layout(height=350)
         st.plotly_chart(fig_corr, use_container_width=True)
@@ -240,7 +242,7 @@ with tab4:
         <ul>
             <li>Avg order: <strong>${avg_value:,.0f}</strong></li>
             <li><strong>{high_value_pct:.0f}%</strong> high-value orders</li>
-            <li>Prioritize fast delivery for ${avg_value*1.5:,.0f}+ orders</li>
+            <li>Fast-track orders > <strong>${avg_value*1.5:,.0f}</strong></li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
