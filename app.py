@@ -3,13 +3,11 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.preprocessing import StandardScaler, LabelEncoder
 from mlxtend.frequent_patterns import apriori, association_rules
 import warnings
 warnings.filterwarnings('ignore')
@@ -18,11 +16,10 @@ warnings.filterwarnings('ignore')
 st.set_page_config(
     page_title="Supply Chain Analytics Dashboard", 
     page_icon="📦", 
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# Dark theme CSS for insights
+# Dark theme CSS for insights - FIXED SYNTAX
 insights_css = """
 <style>
 .insights-dark {
@@ -53,7 +50,7 @@ st.markdown(insights_css, unsafe_allow_html=True)
 # Load data
 @st.cache_data
 def load_data():
-    df = pd.read_csv("data.csv")
+    df = pd.read_csv("Supply-Chain-Disruptions-Inventory.csv")
     df['Date'] = pd.to_datetime(df['Date'])
     return df
 
@@ -66,55 +63,54 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# TOP FILTERS ROW (Side by side buttons)
-row1_col1, row1_col2, row1_col3, row1_col4, row1_col5 = st.columns([1.2, 1.2, 1.2, 1.2, 1.2])
+# TOP NAVIGATION BUTTONS - Side by side
+row1_col1, row1_col2, row1_col3, row1_col4, row1_col5 = st.columns(5)
 
-# Filter buttons
-with row1_col1:
-    if st.button("📈 Overview", use_container_width=True, key="overview_btn"):
-        st.session_state.page = "overview"
-with row1_col2:
-    if st.button("🔍 Clustering", use_container_width=True, key="cluster_btn"):
-        st.session_state.page = "clustering" 
-with row1_col3:
-    if st.button("🌲 ML Models", use_container_width=True, key="ml_btn"):
-        st.session_state.page = "ml"
-with row1_col4:
-    if st.button("🔮 Forecasting", use_container_width=True, key="forecast_btn"):
-        st.session_state.page = "forecast"
-with row1_col5:
-    if st.button("📋 Data", use_container_width=True, key="data_btn"):
-        st.session_state.page = "data"
+# Initialize session state
+if 'page' not in st.session_state:
+    st.session_state.page = "overview"
 
-# FILTER ROW BELOW BUTTONS
+# Navigation buttons
+if row1_col1.button("📈 Overview", use_container_width=True):
+    st.session_state.page = "overview"
+if row1_col2.button("🔍 Clustering", use_container_width=True):
+    st.session_state.page = "clustering" 
+if row1_col3.button("🌲 ML Models", use_container_width=True):
+    st.session_state.page = "ml"
+if row1_col4.button("🔮 Forecasting", use_container_width=True):
+    st.session_state.page = "forecast"
+if row1_col5.button("📋 Data", use_container_width=True):
+    st.session_state.page = "data"
+
+# Highlight active page
+st.markdown(f"""
+<div style='background-color: #1f77b4; padding: 5px; border-radius: 5px; text-align: center; margin-bottom: 20px;'>
+    <span style='color: white; font-weight: bold;'>Current: {st.session_state.page.replace("overview", "📈 Overview").replace("clustering", "🔍 Clustering").replace("ml", "🌲 ML Models").replace("forecast", "🔮 Forecasting").replace("data", "📋 Data")}</span>
+</div>
+""", unsafe_allow_html=True)
+
+# FILTER ROW
 row2_col1, row2_col2, row2_col3 = st.columns(3)
 
 with row2_col1:
     category_filter = st.multiselect(
         "🎯 Product Category", 
         options=sorted(df['Product_Category'].unique()), 
-        default=sorted(df['Product_Category'].unique()),
-        label_visibility="collapsed"
+        default=sorted(df['Product_Category'].unique())
     )
 
 with row2_col2:
     date_range = st.date_input(
         "📅 Date Range", 
-        value=(df['Date'].min().date(), df['Date'].max().date()),
-        label_visibility="collapsed"
+        value=(df['Date'].min().date(), df['Date'].max().date())
     )
 
 with row2_col3:
     supplier_filter = st.multiselect(
         "🏢 Supplier", 
         options=df['Supplier_ID'].unique()[:10],
-        default=df['Supplier_ID'].unique()[:5],
-        label_visibility="collapsed"
+        default=df['Supplier_ID'].unique()[:5]
     )
-
-# Page state management
-if 'page' not in st.session_state:
-    st.session_state.page = "overview"
 
 # Apply filters
 filtered_df = df[
@@ -126,7 +122,7 @@ filtered_df = df[
 
 st.markdown("---")
 
-# MAIN CONTENT - Side by side sections based on page
+# INSIGHTS DISPLAY FUNCTION - FIXED
 def display_insights(title, content):
     st.markdown(f"""
     <div class="insights-dark">
@@ -135,10 +131,10 @@ def display_insights(title, content):
     </div>
     """, unsafe_allow_html=True)
 
+# MAIN CONTENT
 if st.session_state.page == "overview":
     st.header("📈 Executive Overview")
     
-    # KPIs
     col1, col2, col3, col4 = st.columns(4)
     with col1: st.metric("Records", len(filtered_df))
     with col2: st.metric("Products", filtered_df['Product_ID'].nunique())
@@ -148,24 +144,20 @@ if st.session_state.page == "overview":
     col1, col2 = st.columns(2)
     
     with col1:
-        fig1 = px.histogram(filtered_df, x='Product_Category', y='Inventory_Level',
-                           title="📊 Inventory by Category", color='Product_Category')
+        fig1 = px.histogram(filtered_df, x='Product_Category', y='Inventory_Level', color='Product_Category', title="📊 Inventory by Category")
         st.plotly_chart(fig1, use_container_width=True)
-        
-        display_insights("Inventory Insights", f"""
-        <div class="insights-metric">**{filtered_df.groupby('Product_Category')['Inventory_Level'].mean().idxmax()}** leads with {filtered_df.groupby('Product_Category')['Inventory_Level'].mean().max():.0f} avg units</div>
+        display_insights("Inventory Analysis", f"""
+        <div class="insights-metric">**{filtered_df.groupby('Product_Category')['Inventory_Level'].mean().idxmax()}**: {filtered_df.groupby('Product_Category')['Inventory_Level'].mean().max():.0f} avg units</div>
         <div class="insights-metric">**{len(filtered_df[filtered_df['Inventory_Level'] < filtered_df['Safety_Stock']])/len(filtered_df)*100:.1f}%** below safety stock ⚠️</div>
         <div class="insights-metric">Overall avg: **{filtered_df['Inventory_Level'].mean():.0f}** units</div>
         """)
     
     with col2:
-        fig2 = px.box(filtered_df, x='Disruption_Type', y='Delivery_Delay',
-                     title="📦 Delays by Disruption", color='Disruption_Type')
+        fig2 = px.box(filtered_df, x='Disruption_Type', y='Delivery_Delay', color='Disruption_Type', title="📦 Delivery Delays")
         st.plotly_chart(fig2, use_container_width=True)
-        
         display_insights("Delay Analysis", f"""
-        <div class="insights-metric">**{filtered_df.groupby('Disruption_Type')['Delivery_Delay'].median().idxmax()}** causes max delay: {filtered_df.groupby('Disruption_Type')['Delivery_Delay'].median().max():.1f} days 🚨</div>
-        <div class="insights-metric">**{len(filtered_df[filtered_df['Delivery_Delay'] > 3])/len(filtered_df)*100:.1f}%** shipments >3 days late</div>
+        <div class="insights-metric">**{filtered_df.groupby('Disruption_Type')['Delivery_Delay'].median().idxmax()}**: {filtered_df.groupby('Disruption_Type')['Delivery_Delay'].median().max():.1f} days 🚨</div>
+        <div class="insights-metric">**{len(filtered_df[filtered_df['Delivery_Delay'] > 3])/len(filtered_df)*100:.1f}%** >3 days late</div>
         <div class="insights-metric">Median delay: **{filtered_df['Delivery_Delay'].median():.1f}** days</div>
         """)
 
@@ -175,7 +167,6 @@ elif st.session_state.page == "clustering":
     cluster_features = ['Inventory_Level', 'Days_of_Supply', 'Fill_Rate']
     X_cluster = filtered_df[cluster_features].fillna(filtered_df[cluster_features].mean())
     
-    # Elbow + 3D side by side
     col1, col2 = st.columns(2)
     
     with col1:
@@ -188,11 +179,10 @@ elif st.session_state.page == "clustering":
         
         fig_elbow = px.line(x=list(K_range), y=inertias, title="📈 Elbow Method", markers=True)
         st.plotly_chart(fig_elbow, use_container_width=True)
-        
         display_insights("Optimal Clusters", """
         <div class="insights-metric">**k=3 confirmed** by elbow curve 📍</div>
-        <div class="insights-metric">Sharp inertia drop stops at **3 clusters**</div>
-        <div class="insights-metric">Higher k shows **diminishing returns**</div>
+        <div class="insights-metric">Sharp drop stops at **3 clusters**</div>
+        <div class="insights-metric">Diminishing returns beyond k=3</div>
         """)
     
     optimal_k = 3
@@ -200,23 +190,19 @@ elif st.session_state.page == "clustering":
     filtered_df['Cluster'] = kmeans.fit_predict(X_cluster)
     
     with col2:
-        fig_3d = px.scatter_3d(filtered_df, x='Inventory_Level', y='Days_of_Supply', 
-                              z='Fill_Rate', color='Cluster',
-                              title="🎯 3D Clusters", labels={'Cluster': 'Group'})
+        fig_3d = px.scatter_3d(filtered_df, x='Inventory_Level', y='Days_of_Supply', z='Fill_Rate', color='Cluster', title="🎯 3D Clusters")
         fig_3d.update_traces(marker=dict(size=4))
         st.plotly_chart(fig_3d, use_container_width=True)
-        
-        display_insights("Cluster Profiles", f"""
+        display_insights("Cluster Summary", f"""
         <div class="insights-metric">**{filtered_df['Cluster'].value_counts().max()} records** in largest cluster</div>
-        <div class="insights-metric">**{len(filtered_df)} total points** clustered</div>
-        <div class="insights-metric">3 distinct inventory performance groups identified ✅</div>
+        <div class="insights-metric">**{len(filtered_df)} total points** analyzed</div>
+        <div class="insights-metric">3 distinct performance groups ✅</div>
         """)
 
 elif st.session_state.page == "ml":
     st.header("🌲 Machine Learning Models")
-    
-    # Random Forest section
     st.subheader("Random Forest - Demand Prediction")
+    
     rf_features = ['Demand_Forecast', 'Inventory_Level', 'Safety_Stock', 'Lead_Time']
     X_rf = filtered_df[rf_features].fillna(0)
     y_rf = filtered_df['Actual_Demand']
@@ -232,17 +218,15 @@ elif st.session_state.page == "ml":
             importance_df = pd.DataFrame({'feature': rf_features, 'importance': rf.feature_importances_}).sort_values('importance')
             fig_imp = px.bar(importance_df, x='importance', y='feature', orientation='h', color='importance', title="🔍 Feature Importance")
             st.plotly_chart(fig_imp, use_container_width=True)
-            
-            display_insights("Model Drivers", f"""
-            <div class="insights-metric">**{importance_df.iloc[-1]['feature']}** most predictive ({importance_df.iloc[-1]['importance']:.1%})</div>
+            display_insights("Top Predictors", f"""
+            <div class="insights-metric">**{importance_df.iloc[-1]['feature']}**: {importance_df.iloc[-1]['importance']:.1%}</div>
             <div class="insights-metric">R² Score: **{r2_score(y_test, y_pred):.3f}**</div>
             """)
         
         with col2:
-            fig_pred = px.scatter(x=y_test, y=y_pred, trendline="ols", title="🎯 Predictions")
+            fig_pred = px.scatter(x=y_test, y=y_pred, trendline="ols", title="🎯 Predictions vs Actual")
             st.plotly_chart(fig_pred, use_container_width=True)
-            
-            display_insights("Prediction Quality", f"""
+            display_insights("Model Performance", f"""
             <div class="insights-metric">**{((abs(y_test-y_pred)/y_test<0.1).mean()*100:.0f}%** within ±10%</div>
             <div class="insights-metric">RMSE: **{np.sqrt(mean_squared_error(y_test, y_pred)):.0f}**</div>
             """)
@@ -256,14 +240,13 @@ elif st.session_state.page == "forecast":
     df_ts['MA_7'] = df_ts['Actual_Demand'].rolling(7).mean()
     df_ts['MA_30'] = df_ts['Actual_Demand'].rolling(30).mean()
     
-    fig_forecast = px.line(df_ts.tail(90), y=['Actual_Demand', 'MA_7', 'MA_30'], 
-                          title="📈 Demand Trends & Forecasts")
+    fig_forecast = px.line(df_ts.tail(90), y=['Actual_Demand', 'MA_7', 'MA_30'], title="📈 Demand Trends & Forecasts")
     st.plotly_chart(fig_forecast, use_container_width=True)
     
-    display_insights("Forecast Summary", f"""
-    <div class="insights-metric">Latest demand: **{df_ts['Actual_Demand'].iloc[-1]:.0f}**</div>
-    <div class="insights-metric">7-day forecast: **{df_ts['MA_7'].iloc[-1]:.0f}**</div>
-    <div class="insights-metric">30-day trend: **{df_ts['MA_30'].iloc[-1]:.0f}**</div>
+    display_insights("Forecast Metrics", f"""
+    <div class="insights-metric">Latest: **{df_ts['Actual_Demand'].iloc[-1]:.0f}** units</div>
+    <div class="insights-metric">7-day MA: **{df_ts['MA_7'].iloc[-1]:.0f}**</div>
+    <div class="insights-metric">30-day MA: **{df_ts['MA_30'].iloc[-1]:.0f}**</div>
     """)
 
 elif st.session_state.page == "data":
@@ -275,15 +258,15 @@ elif st.session_state.page == "data":
     csv = filtered_df.to_csv(index=False)
     st.download_button("📥 Download CSV", csv, "filtered_data.csv")
     
-    display_insights("Data Profile", f"""
+    display_insights("Data Summary", f"""
     <div class="insights-metric">**{len(filtered_df['Product_Category'].unique())}** categories</div>
     <div class="insights-metric">**{len(filtered_df['Supplier_ID'].unique())}** suppliers</div>
-    <div class="insights-metric">Time span: **{(filtered_df['Date'].max()-filtered_df['Date'].min()).days}** days</div>
+    <div class="insights-metric">**{(filtered_df['Date'].max()-filtered_df['Date'].min()).days}** days span</div>
     """)
 
 # Footer
 st.markdown("""
 <div style='text-align: center; padding: 20px; background-color: #1a1a1a; color: #e0e0e0; border-radius: 10px; margin-top: 40px;'>
-    <p><strong>🚀 Insights-Powered Analytics</strong> | Dark Mode | {len(filtered_df)} records | Built with Streamlit</p>
+    <p><strong>🚀 Analytics Dashboard</strong> | Dark Mode Insights | {len(filtered_df)} records analyzed</p>
 </div>
 """, unsafe_allow_html=True)
