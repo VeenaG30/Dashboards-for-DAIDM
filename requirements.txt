@@ -1,6 +1,5 @@
-streamlit
-pandas
-plotly
-scikit-learn
-mlxtend
-statsmodels
+streamlit==1.38.0
+pandas==2.2.2
+plotly==5.24.0
+numpy==1.26.4
+scikit-learn==1.5.1
