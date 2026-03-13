@@ -12,7 +12,7 @@ if theme == "Dark":
 # --- LOAD DATA ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv("data/Supply_Chain_Disruptions_Inventory.csv", sep=';')
+    df = pd.read_csv("Supply_Chain_Disruptions_Inventory.csv", sep=';')
     df['Date'] = pd.to_datetime(df['Date'])
     return df
 
