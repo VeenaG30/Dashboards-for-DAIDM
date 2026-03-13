@@ -9,21 +9,33 @@ st.set_page_config(page_title="Supply Chain AI Engine", layout="wide")
 # --- DATA LOADING ---
 @st.cache_data
 def load_data():
-    # Updated to your filename: data.csv
     filename = "data.csv"
     try:
+        # 1. Try reading with semicolon
         df = pd.read_csv(filename, sep=';')
+        
+        # 2. If it only read 1 column, try comma
+        if len(df.columns) == 1:
+            df = pd.read_csv(filename, sep=',')
+            
+        # 3. Clean column names (strip spaces)
         df.columns = df.columns.str.strip()
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        
+        # 4. DEBUG: Show us what columns exist
+        st.write("Columns found in CSV:", df.columns.tolist())
+        
+        # 5. Find the Date column (case-insensitive)
+        date_col = next((col for col in df.columns if col.lower() == 'date'), None)
+        
+        if date_col:
+            df['Date'] = pd.to_datetime(df[date_col], errors='coerce')
+        else:
+            st.error("Could not find a 'Date' column. Please check your CSV headers.")
+            
         return df
     except Exception as e:
         st.error(f"Error loading {filename}: {e}")
         return None
-
-df = load_data()
-
-if df is not None:
-    st.title("🌐 Supply Chain Decision Support & AI Engine")
 
     # --- EXECUTIVE SUMMARY ---
     col1, col2, col3, col4 = st.columns(4)
