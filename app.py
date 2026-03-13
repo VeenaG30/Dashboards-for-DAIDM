@@ -1,93 +1,77 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from sklearn.cluster import KMeans
+from sklearn.linear_model import LinearRegression
+from mlxtend.frequent_patterns import apriori
 
-st.set_page_config(page_title="Supply Chain Decision Engine", layout="wide")
+st.set_page_config(page_title="Supply Chain AI Engine", layout="wide")
 
-# --- THEME TOGGLE ---
-theme = st.sidebar.radio("Theme", ["Light", "Dark"])
-if theme == "Dark":
-    st.markdown("<style>body {background-color: #0e1117; color: white;}</style>", unsafe_allow_html=True)
-
-# --- LOAD AND CLEAN DATA ---
+# --- DATA LOADING ---
 @st.cache_data
 def load_data():
-    try:
-        # Attempt to read with semicolon, fallback to comma
-        df = pd.read_csv("data.csv", sep=';')
-        
-        # If only one column was read, it means the separator was wrong
-        if len(df.columns) == 1:
-            df = pd.read_csv("data.csv", sep=',')
-            
-        # CRITICAL: Clean column names (remove leading/trailing spaces/newlines)
-        df.columns = df.columns.str.strip()
-        
-        # Convert Date if it exists
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            
-        return df
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
-        return None
+    # Ensure this matches your exact filename in GitHub
+    filename = "Supply Chain Disruptions Inventory.csv"
+    df = pd.read_csv('data.csv', sep=';')
+    df.columns = df.columns.str.strip()
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    return df
 
 df = load_data()
 
-# --- APP LOGIC ---
-if df is not None:
-    st.title("🌐 Supply Chain Decision Support System")
+st.title("🌐 Supply Chain Decision Support & AI Engine")
+
+# --- EXECUTIVE SUMMARY ---
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Total Lost Sales", f"${df['Lost_Sales_Cost'].sum():,.0f}")
+col2.metric("Avg Fill Rate", f"{df['Fill_Rate'].mean():.1%}")
+col3.metric("High Risk SKUs", int(df['Stockout_Flag'].sum()))
+col4.metric("Avg Lead Time", f"{df['Lead_Time'].mean():.1f} Days")
+
+# --- TABS ---
+tab1, tab2, tab3, tab4 = st.tabs(["Diagnostic", "Forecasting", "Predictive AI", "Prescriptive Action"])
+
+with tab1: # Diagnostic
+    st.subheader("Financial Impact by Disruption")
+    fig = px.pie(df, values='Lost_Sales_Cost', names='Disruption_Type', hole=0.4)
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab2: # Forecasting
+    st.subheader("Demand vs. Forecast")
+    fig = px.line(df.groupby('Date')[['Demand_Forecast', 'Actual_Demand']].sum().reset_index(), x='Date', y=['Demand_Forecast', 'Actual_Demand'])
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab3: # Predictive AI (Clustering & Regression)
+    st.subheader("Inventory Segmentation (K-Means Clustering)")
+    features = df[['Inventory_Level', 'Holding_Cost']].dropna()
+    kmeans = KMeans(n_clusters=3, n_init=10).fit(features)
+    df['Cluster'] = kmeans.labels_.astype(str)
+    fig_cluster = px.scatter(df, x='Inventory_Level', y='Holding_Cost', color='Cluster', title="Inventory vs Holding Cost Clusters")
+    st.plotly_chart(fig_cluster, use_container_width=True)
+
+    st.subheader("Lead Time Impact Analysis (Regression)")
+    model = LinearRegression().fit(df[['Lead_Time']], df['Lost_Sales_Cost'])
+    fig_reg = px.scatter(df, x='Lead_Time', y='Lost_Sales_Cost', trendline="ols", title="Correlation: Lead Time vs Lost Sales")
+    st.plotly_chart(fig_reg, use_container_width=True)
+
+with tab4: # Prescriptive
+    st.subheader("🛠 Managerial Action Center")
     
-    # Debugging: Show columns if something is missing
-    # st.write("Columns detected:", df.columns.tolist()) 
-
-    # --- EXECUTIVE SUMMARY ---
-    st.subheader("💡 Executive Decision Summary")
-    col1, col2, col3 = st.columns(3)
+    # Simulation
+    st.sidebar.header("Scenario Simulator")
+    delay = st.sidebar.slider("Simulate Lead Time Increase (Days)", 0, 30, 5)
+    impact = model.predict([[delay]])[0]
+    st.warning(f"If lead time increases by {delay} days, projected lost sales increase by **${impact:,.2f}**")
     
-    # Use .get() or check existence to prevent KeyError
-    lost_sales = df['Lost_Sales_Cost'].sum() if 'Lost_Sales_Cost' in df.columns else 0
-    fill_rate = df['Fill_Rate'].mean() if 'Fill_Rate' in df.columns else 0
-    high_risk = df[df['Stockout_Flag'] == 1]['Product_ID'].nunique() if 'Stockout_Flag' in df.columns else 0
+    # Recommendations
+    st.write("### Recommended Actions")
+    if df[df['Excess_Inventory_Flag'] == 1].shape[0] > 0:
+        st.success("✅ Reduce procurement for items with high Excess Inventory.")
+    
+    st.dataframe(df.head(10))
 
-    col1.metric("Total Lost Sales", f"${lost_sales:,.0f}")
-    col2.metric("Avg Fill Rate", f"{fill_rate:.1%}")
-    col3.metric("High Risk SKUs", high_risk)
-
-    # --- TABS ---
-    tab1, tab2, tab3, tab4 = st.tabs(["Diagnostic", "Forecasting", "Predictive", "Prescriptive Action"])
-
-    with tab1:
-        if 'Disruption_Type' in df.columns and 'Lost_Sales_Cost' in df.columns:
-            fig = px.pie(df, values='Lost_Sales_Cost', names='Disruption_Type', title="Financial Impact by Disruption Type")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.write("Required columns for Diagnostic missing.")
-
-    with tab2:
-        if 'Date' in df.columns and 'Demand_Forecast' in df.columns:
-            fig = px.line(df.groupby('Date')[['Demand_Forecast', 'Actual_Demand']].sum().reset_index(), 
-                          x='Date', y=['Demand_Forecast', 'Actual_Demand'])
-            st.plotly_chart(fig, use_container_width=True)
-
-    with tab3:
-        if 'Lead_Time' in df.columns and 'Inventory_Level' in df.columns:
-            fig = px.scatter(df, x='Lead_Time', y='Inventory_Level', color='Stockout_Flag', 
-                             size='Lost_Sales_Cost', hover_data=['Product_ID'])
-            st.plotly_chart(fig, use_container_width=True)
-
-    with tab4:
-        st.write("### 🛠 Managerial Action Center")
-        if 'Excess_Inventory_Flag' in df.columns:
-            excess = df[df['Excess_Inventory_Flag'] == 1]
-            if not excess.empty:
-                st.warning(f"⚠️ {len(excess)} items have excess inventory. Reduce procurement.")
-        
-        if 'Supplier_Rating' in df.columns:
-            poor = df[df['Supplier_Rating'] < 3]['Supplier_ID'].unique()
-            st.info(f"📋 Supplier Review: {len(poor)} suppliers have low ratings.")
-            
-        st.dataframe(df.head(10))
-
-else:
-    st.warning("Data could not be loaded. Please check your CSV file name and format.")
+# --- FOOTER ---
+st.sidebar.markdown("---")
+theme = st.sidebar.radio("Theme", ["Light", "Dark"])
+if theme == "Dark":
+    st.markdown("<style>body {background-color: #0e1117; color: white;}</style>", unsafe_allow_html=True)
