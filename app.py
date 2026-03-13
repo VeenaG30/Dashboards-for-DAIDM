@@ -1,8 +1,9 @@
 """
-🚀 SUPPLY CHAIN DASHBOARD - KEYERROR FIXED
-✅ Month_Year created AFTER filtering
-✅ No more column missing errors
-✅ Tabs + Filters + Insights PERFECT
+🚀 SUPPLY CHAIN DASHBOARD - FINAL VERSION
+✅ 5th Tab: Raw Data 
+✅ 3D Cluster Graph (BIGGER)
+✅ All previous fixes included
+✅ Production Ready
 """
 
 import streamlit as st
@@ -10,6 +11,8 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -74,13 +77,32 @@ def get_kpis(df):
         'avg_inventory': df['Inventory_Level'].mean()
     }
 
+def create_3d_cluster(df):
+    """Create BIG 3D cluster visualization"""
+    features = ['Actual_Demand', 'Lead_Time_Days', 'Order_Value']
+    X = df[features].fillna(0)
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # KMeans clustering
+    kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
+    clusters = kmeans.fit_predict(X_scaled)
+    
+    # Add cluster to dataframe
+    df_cluster = df.copy()
+    df_cluster['Cluster'] = clusters
+    
+    return df_cluster, kmeans, scaler
+
 # MAIN APP
 st.title("📦 Supply Chain Analytics Dashboard")
 
 df = load_data()
 
-# === TABS FIRST ===
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🔄 Demand", "🚚 Operations", "💰 Finance"])
+# === TABS FIRST (5 TABS NOW) ===
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "🔄 Demand", "🚚 Operations", "💰 Finance", "📋 Raw Data"])
 
 # === FILTERS BELOW TABS ===
 st.markdown("---")
@@ -93,7 +115,7 @@ with col2:
 with col3:
     status_filter = st.multiselect("✅ Status", options=sorted(df['Delivery_Status'].unique()), default=sorted(df['Delivery_Status'].unique()))
 
-# Apply filters FIRST
+# Apply filters
 mask = (
     (df['Date'] >= pd.to_datetime(date_range[0])) &
     (df['Date'] <= pd.to_datetime(date_range[1])) &
@@ -101,8 +123,6 @@ mask = (
     (df['Delivery_Status'].isin(status_filter))
 )
 df_filtered = df[mask].copy()
-
-# ✅ FIXED: Create Month_Year AFTER filtering
 df_filtered['Month_Year'] = df_filtered['Date'].dt.strftime('%Y-%m')
 
 # === TAB 1: OVERVIEW ===
@@ -132,7 +152,6 @@ with tab1:
         fig_lead.update_layout(height=350)
         st.plotly_chart(fig_lead, use_container_width=True)
     
-    # INSIGHTS
     a_class_count = len(abc[abc['ABC'] == 'A'])
     st.markdown(f"""
     <div class="insight-box">
@@ -158,14 +177,12 @@ with tab2:
         st.plotly_chart(fig_trend, use_container_width=True)
     
     with col2:
-        # ✅ FIXED: Month_Year exists now!
         demand_monthly = df_filtered.groupby('Month_Year')['Actual_Demand'].sum().reset_index()
         demand_monthly['Month_Year'] = pd.to_datetime(demand_monthly['Month_Year'] + '-01')
         fig_monthly = px.bar(demand_monthly, x='Month_Year', y='Actual_Demand', title="📊 Monthly Demand")
         fig_monthly.update_layout(height=350, xaxis_tickangle=-45)
         st.plotly_chart(fig_monthly, use_container_width=True)
     
-    # INSIGHTS
     recent_avg = df_filtered['Actual_Demand'].tail(30).mean()
     st.markdown(f"""
     <div class="insight-box">
@@ -197,7 +214,6 @@ with tab3:
         fig_pie = px.pie(df_filtered, names='Delivery_Status', title="📋 Status Breakdown")
         st.plotly_chart(fig_pie, use_container_width=True)
     
-    # INSIGHTS
     if len(region_stats) > 0:
         top_region = region_stats.loc[region_stats['Actual_Demand'].idxmax(), 'Region']
         delayed_pct = (df_filtered['Delivery_Status'] == 'Delayed').mean() * 100
@@ -212,9 +228,9 @@ with tab3:
         </div>
         """, unsafe_allow_html=True)
 
-# === TAB 4: FINANCE ===
+# === TAB 4: FINANCE + 3D CLUSTER ===
 with tab4:
-    st.header("💰 Financial Analytics")
+    st.header("💰 Finance & Clustering")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -226,23 +242,82 @@ with tab4:
         st.plotly_chart(fig_scatter, use_container_width=True)
     
     with col2:
-        corr_cols = ['Actual_Demand', 'Lead_Time_Days', 'Order_Value']
-        corr_data = df_filtered[corr_cols].corr()
-        fig_corr = px.imshow(corr_data, title="🔗 Correlations", 
-                           color_continuous_scale='RdBu_r', aspect="auto")
-        fig_corr.update_layout(height=350)
-        st.plotly_chart(fig_corr, use_container_width=True)
+        # ✅ BIG 3D CLUSTER GRAPH
+        df_cluster, kmeans, scaler = create_3d_cluster(df_filtered.sample(2000))
+        
+        fig_3d = px.scatter_3d(df_cluster, x='Actual_Demand', y='Order_Value', z='Lead_Time_Days',
+                             color='Cluster',
+                             title="🌐 3D Customer Clustering",
+                             color_discrete_sequence=px.colors.qualitative.Set1,
+                             size_max=10)
+        fig_3d.update_layout(
+            height=500,  # BIGGER
+            scene=dict(
+                xaxis_title="Demand",
+                yaxis_title="Order Value",
+                zaxis_title="Lead Time",
+                camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))  # 3D perspective
+            ),
+            margin=dict(l=0, r=0, b=0, t=50)
+        )
+        st.plotly_chart(fig_3d, use_container_width=True)
     
-    # INSIGHTS
     avg_value = df_filtered['Order_Value'].mean()
     high_value_pct = (df_filtered['Order_Value'] > avg_value * 1.5).mean() * 100
+    cluster_counts = df_cluster['Cluster'].value_counts()
     st.markdown(f"""
     <div class="insight-box">
-        <h3>💡 Financial Insights</h3>
+        <h3>💡 Financial & Clustering Insights</h3>
         <ul>
             <li>Avg order: <strong>${avg_value:,.0f}</strong></li>
             <li><strong>{high_value_pct:.0f}%</strong> high-value orders</li>
-            <li>Fast-track orders > <strong>${avg_value*1.5:,.0f}</strong></li>
+            <li>5 customer clusters identified for targeted strategies</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
+
+# === TAB 5: RAW DATA ===
+with tab5:
+    st.header("📋 Raw Data Explorer")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("🔍 Filtered Dataset")
+        st.dataframe(
+            df_filtered[['Product_ID', 'Customer_ID', 'Region', 'Date', 'Actual_Demand', 
+                        'Lead_Time_Days', 'Delivery_Status', 'Order_Value']].head(1000),
+            use_container_width=True,
+            height=600
+        )
+    
+    with col2:
+        st.subheader("📈 Dataset Summary")
+        st.metric("Total Records", len(df_filtered))
+        st.metric("Date Range", f"{df_filtered['Date'].min().date()} to {df_filtered['Date'].max().date()}")
+        st.metric("Unique Products", df_filtered['Product_ID'].nunique())
+        st.metric("Unique Customers", df_filtered['Customer_ID'].nunique())
+        
+        # Download button
+        csv = df_filtered.to_csv(index=False)
+        st.download_button(
+            label="💾 Download CSV",
+            data=csv,
+            file_name="supply_chain_data_filtered.csv",
+            mime="text/csv"
+        )
+    
+    st.markdown("""
+    <div class="insight-box">
+        <h3>💡 Data Tips</h3>
+        <ul>
+            <li>Adjust filters above to explore different data slices</li>
+            <li>Download filtered data for further analysis</li>
+            <li>Clustering data available in Finance tab</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+# FOOTER
+st.markdown("---")
+st.markdown("*✅ Production Ready | 5 Tabs | 3D Clustering | Raw Data Export*")
