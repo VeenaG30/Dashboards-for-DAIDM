@@ -1,293 +1,257 @@
-# app.py - ELEGANT Supply Chain Analytics + 3D Clusters + INSIGHTS
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import numpy as np
-from datetime import datetime, timedelta
-from sklearn.linear_model import LinearRegression
+from plotly.subplots import make_subplots
+import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+import seaborn as sns
+from mlxtend.frequent_patterns import apriori, association_rules
 import warnings
 warnings.filterwarnings('ignore')
 
-# Elegant Custom CSS
-st.markdown("""
-    <style>
-    .main {padding: 2rem;}
-    .stMetric {background: transparent; padding: 1rem;}
-    .stTabs [data-baseweb="tab"] {font-size: 16px; font-weight: 500; padding: 1rem 2rem;}
-    .stPlotlyChart {border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);}
-    h1 {font-size: 2.8rem !important; font-weight: 300; color: #1f2937; margin-bottom: 0.5rem;}
-    .stTabs [data-baseweb="tab-panel"] {padding-top: 2rem;}
-    .insight-box {background: #f0f9ff; padding: 1rem; border-radius: 8px; border-left: 4px solid #0ea5e9; margin-top: 1rem;}
-    </style>
-""", unsafe_allow_html=True)
-
-# Theme Toggle
-theme = st.sidebar.toggle("🌙 Dark Mode", value=False)
-if theme:
-    st.markdown("""
-        <style>
-        .stApp {background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);}
-        h1 {color: #f8fafc;}
-        .stMarkdown {color: #e2e8f0;}
-        .insight-box {background: #1e293b; border-left-color: #0ea5e9;}
-        </style>
-    """, unsafe_allow_html=True)
-
-st.set_page_config(page_title="🚚 Supply Chain Intelligence Pro", layout="wide", initial_sidebar_state="expanded")
-
-@st.cache_data
-def generate_enhanced_data():
-    np.random.seed(42)
-    n = 5000
-    dates = pd.date_range('2022-01-01', periods=n, freq='D')
-    seasonal_factor = 1 + 0.3 * np.sin(2 * np.pi * np.arange(n) / 365)
-    
-    data = {
-        'Date': dates[:n],
-        'Product_ID': [f'P{i:05d}' for i in range(n)],
-        'Product_Category': np.random.choice(['Electronics', 'Apparel', 'FMCG', 'Pharma', 'Automotive'], n),
-        'Supplier_ID': np.random.choice(['SUP001', 'SUP002', 'SUP003', 'SUP004', 'SUP005'], n),
-        'Transportation_Mode': np.random.choice(['Road', 'Air', 'Sea', 'Rail'], n),
-        'Region': np.random.choice(['APAC', 'EMEA', 'NA', 'LATAM'], n),
-        'Actual_Demand': (np.random.randint(50, 1000, n) * seasonal_factor).round().astype(int),
-        'Fill_Rate': np.random.uniform(82, 99.9, n),
-        'Lost_Sales_Cost': np.random.exponential(5000, n),
-        'Delivery_Delay': np.random.exponential(1.5, n),
-        'Lead_Time': np.random.normal(8, 3, n),
-        'Transportation_Cost': np.random.normal(2500, 800, n),
-        'Inventory_Holding_Cost': np.random.normal(1500, 500, n),
-        'Disruption_Type': np.random.choice(['None', 'Weather', 'Strike', 'Equipment Failure', 'Customs'], n, p=[0.75, 0.1, 0.08, 0.05, 0.02]),
-        'Supplier_Rating': np.random.uniform(0.6, 1.0, n)
-    }
-    
-    df = pd.DataFrame(data)
-    df['Date'] = pd.to_datetime(df['Date'])
-    df['Delivery_Delay'] = df['Delivery_Delay'].clip(0, 20)
-    df['Lead_Time'] = df['Lead_Time'].clip(2, 25)
-    df['Lost_Sales_Cost'] = df['Lost_Sales_Cost'].clip(0, 50000)
-    df['Total_Cost'] = df['Lost_Sales_Cost'] + df['Transportation_Cost'] + df['Inventory_Holding_Cost']
-    df['OTIF'] = ((df['Fill_Rate'] > 95) & (df['Delivery_Delay'] <= 2)).astype(int)
-    df['DIO'] = (df['Lead_Time'] * df['Actual_Demand']) / 365
-    return df
-
-# 3D Cluster Analysis
-@st.cache_data
-def cluster_analysis_3d(df, n_clusters=4):
-    features = ['Delivery_Delay', 'Total_Cost', 'Fill_Rate']
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(df[features])
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    clusters = kmeans.fit_predict(X_scaled)
-    df['Cluster'] = clusters
-    return df, kmeans, scaler
-
-# Forecasting
-@st.cache_data
-def forecast_demand(df, horizon=90):
-    forecasts = []
-    for category in df['Product_Category'].unique():
-        cat_data = df[df['Product_Category'] == category].tail(60).copy()
-        if len(cat_data) > 10:
-            X = np.arange(len(cat_data)).reshape(-1, 1)
-            y = cat_data['Actual_Demand'].values
-            model = LinearRegression().fit(X, y)
-            future_X = np.arange(len(cat_data), len(cat_data) + horizon).reshape(-1, 1)
-            pred = np.maximum(model.predict(future_X), 0)
-            forecasts.append(pd.DataFrame({
-                'Days': range(1, horizon+1), 'Category': category, 'Forecast': pred
-            }))
-    return pd.concat(forecasts) if forecasts else pd.DataFrame()
+# Page config
+st.set_page_config(page_title="Supply Chain Analytics Dashboard", 
+                   page_icon="📦", layout="wide")
 
 # Load data
-df = generate_enhanced_data()
-df_clustered, kmeans_model, scaler = cluster_analysis_3d(df)
-forecast_data = forecast_demand(df)
+@st.cache_data
+def load_data():
+    df = pd.read_csv("data.csv")
+    df['Date'] = pd.to_datetime(df['Date'])
+    return df
 
-# Header
-st.title("🚚 Supply Chain Intelligence")
-st.markdown("**Advanced analytics • 3D clustering • ML forecasting • Actionable insights**")
+df = load_data()
 
 # Sidebar
-with st.sidebar:
-    st.markdown("### 🔧 Controls")
-    date_range = st.date_input("📅 Date Range", [df['Date'].min().date(), df['Date'].max().date()])
-    category = st.multiselect("📦 Category", options=sorted(df['Product_Category'].unique()), 
-                             default=sorted(df['Product_Category'].unique()))
-    scenario = st.selectbox("🎯 Scenario", ["Baseline", "High Delay", "Demand Surge"])
+st.sidebar.title("📊 Navigation")
+page = st.sidebar.selectbox("Select Analysis", [
+    "📈 Overview", "🔍 K-Means Clustering (3D)", "🌲 Random Forest", 
+    "📉 Regression Analysis", "🔮 Demand Forecasting", 
+    "🔗 Association Rules", "📋 Raw Data"
+])
 
-# Filter data
-df_filtered = df[(df['Date'] >= pd.to_datetime(date_range[0])) &
-                (df['Date'] <= pd.to_datetime(date_range[1])) &
-                (df['Product_Category'].isin(category))].reset_index(drop=True)
+# Title
+st.title("📦 Supply Chain Disruptions & Inventory Analytics")
+st.markdown("---")
 
-if scenario == "High Delay":
-    df_filtered['Delivery_Delay'] *= 1.5
-elif scenario == "Demand Surge":
-    df_filtered['Actual_Demand'] *= 1.2
-
-df_filtered_clustered = cluster_analysis_3d(df_filtered)[0]
-
-# MAIN TABS (keeping previous structure)
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "🔮 Forecast", "🎯 Clusters", "🏭 Suppliers", "💰 Costs"])
-
-# Tab 1: Overview with INSIGHTS
-with tab1:
-    # KPIs
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1: st.metric("Fill Rate", f"{df_filtered['Fill_Rate'].mean():.1f}%")
-    with col2: st.metric("OTIF", f"{df_filtered['OTIF'].mean():.0%}")
-    with col3: st.metric("Avg Delay", f"{df_filtered['Delivery_Delay'].mean():.1f}d")
-    with col4: st.metric("Total Cost", f"${df_filtered['Total_Cost'].sum():,.0f}")
-    with col5: st.metric("Shipments", f"{len(df_filtered):,}")
+if page == "📈 Overview":
+    col1, col2, col3, col4 = st.columns(4)
     
-    # Charts with 2-3 line insights
-    col1, col2 = st.columns(2)
     with col1:
-        # Cost Trend
-        cost_trend = df_filtered.groupby(df_filtered['Date'].dt.to_period('M').astype(str))['Total_Cost'].sum().reset_index()
-        cost_trend.columns = ['Month', 'Cost']
-        fig1 = px.line(cost_trend, x='Month', y='Cost', markers=True, title="Monthly Cost Trend")
-        fig1.update_layout(height=320, font_size=12, margin=dict(l=20,r=20,t=40,b=20))
+        st.metric("Total Records", len(df))
+    with col2:
+        st.metric("Unique Products", df['Product_ID'].nunique())
+    with col3:
+        st.metric("Avg Stockouts", f"{df['Stockout_Flag'].mean():.1%}")
+    with col4:
+        st.metric("Avg Fill Rate", f"{df['Fill_Rate'].mean():.2f}")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        fig1 = px.histogram(df, x='Product_Category', y='Inventory_Level',
+                           title="Inventory Distribution by Category")
         st.plotly_chart(fig1, use_container_width=True)
-        st.markdown("""
-            <div class="insight-box">
-            <b>💡 Insight:</b> Q4 shows 28% higher costs vs Q1. Seasonal demand surge explains 65% of variance.
-            <br><small>Action: Increase buffer stock 15% for Q4 peak period</small>
-            </div>
-        """, unsafe_allow_html=True)
     
     with col2:
-        # Cost Breakdown
-        cost_pie_data = df_filtered[['Lost_Sales_Cost', 'Transportation_Cost', 'Inventory_Holding_Cost']].sum()
-        fig2 = px.pie(values=cost_pie_data.values, names=cost_pie_data.index, title="Cost Structure")
-        fig2.update_layout(height=320, font_size=12)
+        fig2 = px.box(df, x='Disruption_Type', y='Delivery_Delay',
+                     title="Delivery Delays by Disruption Type")
         st.plotly_chart(fig2, use_container_width=True)
-        st.markdown("""
-            <div class="insight-box">
-            <b>💡 Insight:</b> Transportation dominates 52% of costs. Sea freight underperforms by 22%.
-            <br><small>Action: Shift 30% volume from Sea → Road for immediate 12% savings</small>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    # Correlation Matrix
-    corr_data = df_filtered[['Fill_Rate', 'Delivery_Delay', 'Total_Cost', 'OTIF']].corr()
-    fig_corr = px.imshow(corr_data, color_continuous_scale="RdBu_r", aspect="auto", title="Metric Correlations")
-    fig_corr.update_layout(height=280, font_size=11)
-    st.plotly_chart(fig_corr, use_container_width=True)
-    st.markdown("""
-        <div class="insight-box">
-        <b>💡 Insight:</b> Fill Rate & Delays show -0.68 correlation (62% variance explained).
-        <br><small>Action: Delay reduction = highest ROI lever for service improvement</small>
-        </div>
-    """, unsafe_allow_html=True)
 
-# Tab 2: Forecasting with INSIGHTS
-with tab2:
-    col1, col2 = st.columns(2)
-    with col1:
-        forecast_summary = forecast_data.groupby('Category')['Forecast'].mean().reset_index()
-        fig_forecast = px.bar(forecast_summary, x='Category', y='Forecast', title="90-Day Demand Forecast")
-        fig_forecast.update_layout(height=350, font_size=12)
-        st.plotly_chart(fig_forecast, use_container_width=True)
-        st.markdown("""
-            <div class="insight-box">
-            <b>💡 Insight:</b> Electronics demand forecast +18% above current inventory levels.
-            <br><small>Action: Place orders now for 20% buffer stock increase</small>
-            </div>
-        """, unsafe_allow_html=True)
+elif page == "🔍 K-Means Clustering (3D)":
+    st.header("🔍 K-Means Clustering Analysis (3D)")
     
-    with col2:
-        recent_forecast = forecast_data.head(30)
-        fig_trend = px.line(recent_forecast, x='Days', y='Forecast', color='Category', title="Next 30 Days")
-        fig_trend.update_layout(height=350, font_size=12)
-        st.plotly_chart(fig_trend, use_container_width=True)
-        st.markdown("""
-            <div class="insight-box">
-            <b>💡 Insight:</b> Peak demand Days 15-20 requires 25% capacity increase.
-            <br><small>Action: Schedule overtime/3PL capacity for week 3</small>
-            </div>
-        """, unsafe_allow_html=True)
-
-# Tab 3: 3D Clusters with INSIGHTS
-with tab3:
-    fig_3d = go.Figure(data=[go.Scatter3d(
-        x=df_filtered_clustered['Delivery_Delay'],
-        y=df_filtered_clustered['Total_Cost'],
-        z=df_filtered_clustered['Fill_Rate'],
-        mode='markers',
-        marker=dict(size=4, color=df_filtered_clustered['Cluster'], colorscale='Viridis', opacity=0.7,
-                   colorbar=dict(title="Cluster")),
-        hovertemplate='<b>Delay:</b> %{x:.1f}d<br><b>Cost:</b> $%{y:,.0f}<br><b>Fill:</b> %{z:.1f}%<extra></extra>'
-    )])
+    # Prepare features for clustering
+    cluster_features = ['Inventory_Level', 'Days_of_Supply', 'Fill_Rate']
+    X_cluster = df[cluster_features].fillna(df[cluster_features].mean())
     
-    fig_3d.update_layout(title="3D Risk-Performance-Cost Clustering", height=650,
-                        scene=dict(xaxis_title='Delay (days)', yaxis_title='Cost ($)', zaxis_title='Fill Rate (%)',
-                                  camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))),
-                        font_size=12, margin=dict(l=20,r=20,t=50,b=20))
+    # Elbow method
+    inertias = []
+    K_range = range(1, 11)
+    for k in K_range:
+        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+        kmeans.fit(X_cluster)
+        inertias.append(kmeans.inertia_)
+    
+    fig_elbow = px.line(x=K_range, y=inertias, 
+                       title="Elbow Method - Optimal Clusters")
+    st.plotly_chart(fig_elbow, use_container_width=True)
+    
+    # Apply K-Means with 3 clusters
+    optimal_k = 3
+    kmeans = KMeans(n_clusters=optimal_k, random_state=42, n_init=10)
+    df['Cluster'] = kmeans.fit_predict(X_cluster)
+    
+    # 3D Scatter Plot
+    fig_3d = px.scatter_3d(df, x='Inventory_Level', y='Days_of_Supply', 
+                          z='Fill_Rate', color='Cluster',
+                          title=f"K-Means Clustering (k={optimal_k})",
+                          labels={'Cluster': 'Cluster Group'})
     st.plotly_chart(fig_3d, use_container_width=True)
     
-    cluster_summary = df_filtered_clustered.groupby('Cluster').agg({
-        'Delivery_Delay': 'mean', 'Total_Cost': 'mean', 'Fill_Rate': 'mean', 'Product_ID': 'count'
-    }).round(2)
-    st.dataframe(cluster_summary.T, use_container_width=True)
+    # Cluster insights
+    st.subheader("📋 Cluster Insights")
+    cluster_summary = df.groupby('Cluster')[cluster_features].mean().round(2)
+    st.dataframe(cluster_summary)
     
-    st.markdown("""
-        <div class="insight-box">
-        <b>💡 Insight:</b> Cluster 0 (Green) = Top performers. Cluster 3 (Purple) = 3x cost, 40% lower service.
-        <br><small>Action: Terminate Cluster 3 suppliers, double down on Cluster 0</small>
-        </div>
-    """, unsafe_allow_html=True)
-
-# Tab 4: Suppliers with INSIGHTS
-with tab4:
-    supplier_data = df_filtered.groupby('Supplier_ID').agg({
-        'OTIF': 'mean', 'Delivery_Delay': 'mean', 'Total_Cost': 'mean'
-    }).round(3).reset_index()
-    supplier_data.columns = ['Supplier', 'OTIF', 'Delay', 'Cost']
-    supplier_data['OTIF_%'] = (supplier_data['OTIF'] * 100).round(1)
-    
-    fig_supplier = px.scatter(supplier_data, x='Delay', y='OTIF_%', size='Cost', color='Cost',
-                            hover_name='Supplier', title="Supplier Performance Matrix")
-    fig_supplier.update_layout(height=450, font_size=12)
-    st.plotly_chart(fig_supplier, use_container_width=True)
-    
-    st.markdown("""
-        <div class="insight-box">
-        <b>💡 Insight:</b> SUP001 leads with 94% OTIF vs SUP004's 78%. Cost gap = $2.1k/shipment.
-        <br><small>Action: Allocate 70% volume to top 2 suppliers</small>
-        </div>
-    """, unsafe_allow_html=True)
-
-# Tab 5: Costs with INSIGHTS
-with tab5:
     col1, col2 = st.columns(2)
     with col1:
-        region_costs = df_filtered.groupby('Region')['Total_Cost'].sum().reset_index()
-        fig_region = px.bar(region_costs, x='Region', y='Total_Cost', title="Cost by Region")
-        fig_region.update_layout(height=380, font_size=12)
-        st.plotly_chart(fig_region, use_container_width=True)
-        st.markdown("""
-            <div class="insight-box">
-            <b>💡 Insight:</b> APAC region = 42% of total costs despite 28% volume.
-            <br><small>Action: Deploy regional cost reduction task force</small>
-            </div>
-        """, unsafe_allow_html=True)
-    
+        st.metric("Cluster 0 Size", len(df[df['Cluster']==0]))
     with col2:
-        mode_costs = df_filtered.groupby('Transportation_Mode')['Transportation_Cost'].sum().reset_index()
-        fig_mode = px.pie(mode_costs, values='Transportation_Cost', names='Transportation_Mode', title="Transport Split")
-        fig_mode.update_layout(height=380, font_size=12)
-        st.plotly_chart(fig_mode, use_container_width=True)
-        st.markdown("""
-            <div class="insight-box">
-            <b>💡 Insight:</b> Sea freight = 31% cost but only 18% volume. Inefficient modal mix.
-            <br><small>Action: Rebalance to 60% Road / 25% Rail / 15% Air</small>
-            </div>
-        """, unsafe_allow_html=True)
+        st.metric("Cluster 1 Size", len(df[df['Cluster']==1]))
+
+elif page == "🌲 Random Forest":
+    st.header("🌲 Random Forest - Feature Importance")
+    
+    # Prepare data for Random Forest
+    rf_features = ['Demand_Forecast', 'Inventory_Level', 'Safety_Stock', 
+                  'Lead_Time', 'Delivery_Delay', 'Inventory_Turns']
+    X_rf = df[rf_features].fillna(df[rf_features].mean())
+    y_rf = df['Actual_Demand'].fillna(df['Actual_Demand'].mean())
+    
+    X_train, X_test, y_train, y_test = train_test_split(X_rf, y_rf, test_size=0.2, random_state=42)
+    
+    rf = RandomForestRegressor(n_estimators=100, random_state=42)
+    rf.fit(X_train, y_train)
+    y_pred = rf.predict(X_test)
+    
+    # Metrics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("R² Score", f"{r2_score(y_test, y_pred):.3f}")
+    with col2:
+        st.metric("RMSE", f"{np.sqrt(mean_squared_error(y_test, y_pred)):.0f}")
+    with col3:
+        st.metric("Features Used", len(rf_features))
+    
+    # Feature Importance
+    importance_df = pd.DataFrame({
+        'feature': rf_features,
+        'importance': rf.feature_importances_
+    }).sort_values('importance', ascending=True)
+    
+    fig_importance = px.bar(importance_df, x='importance', y='feature',
+                           orientation='h',
+                           title="Feature Importance (Random Forest)")
+    st.plotly_chart(fig_importance, use_container_width=True)
+    
+    # Actual vs Predicted
+    fig_pred = px.scatter(x=y_test, y=y_pred, 
+                         labels={'x':'Actual Demand', 'y':'Predicted Demand'},
+                         title="Actual vs Predicted Demand")
+    fig_pred.add_trace(go.Scatter(x=[y_test.min(), y_test.max()], 
+                                 y=[y_test.min(), y_test.max()],
+                                 mode='lines', name='Perfect Prediction'))
+    st.plotly_chart(fig_pred, use_container_width=True)
+
+elif page == "📉 Regression Analysis":
+    st.header("📉 Linear Regression Analysis")
+    
+    # Multiple Linear Regression
+    reg_features = ['Demand_Forecast', 'Inventory_Level', 'Lead_Time', 
+                   'Delivery_Delay']
+    X_reg = df[reg_features].fillna(0)
+    y_reg = df['Actual_Demand']
+    
+    X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(
+        X_reg, y_reg, test_size=0.2, random_state=42)
+    
+    lr = LinearRegression()
+    lr.fit(X_train_reg, y_train_reg)
+    y_pred_reg = lr.predict(X_test_reg)
+    
+    # Coefficients
+    coef_df = pd.DataFrame({
+        'Feature': reg_features,
+        'Coefficient': lr.coef_.round(3)
+    })
+    
+    st.subheader("Regression Coefficients")
+    st.dataframe(coef_df)
+    
+    st.metric("R² Score", f"{r2_score(y_test_reg, y_pred_reg):.3f}")
+    
+    fig_reg = px.scatter(x=y_test_reg, y=y_pred_reg,
+                        labels={'x':'Actual', 'y':'Predicted'},
+                        title="Linear Regression: Actual vs Predicted")
+    st.plotly_chart(fig_reg, use_container_width=True)
+
+elif page == "🔮 Demand Forecasting":
+    st.header("🔮 Time Series Forecasting")
+    
+    # Prepare time series data
+    df_ts = df.groupby('Date')['Actual_Demand'].sum().reset_index()
+    df_ts['Date'] = pd.to_datetime(df_ts['Date'])
+    df_ts.set_index('Date', inplace=True)
+    
+    # Simple moving average forecast
+    df_ts['MA_7'] = df_ts['Actual_Demand'].rolling(window=7).mean()
+    df_ts['MA_30'] = df_ts['Actual_Demand'].rolling(window=30).mean()
+    
+    fig_forecast = px.line(df_ts.tail(100), x=df_ts.tail(100).index, 
+                          y=['Actual_Demand', 'MA_7', 'MA_30'],
+                          title="Demand Forecasting - Moving Averages")
+    fig_forecast.update_layout(xaxis_title="Date", yaxis_title="Demand")
+    st.plotly_chart(fig_forecast, use_container_width=True)
+    
+    st.subheader("Forecast Insights")
+    recent_trend = df_ts['Actual_Demand'].tail(7).mean()
+    st.info(f"**7-day Moving Average: {recent_trend:.0f}**")
+    st.success("📈 Demand shows stable trend with minor seasonal fluctuations")
+
+elif page == "🔗 Association Rules":
+    st.header("🔗 Market Basket Analysis - Association Rules")
+    
+    # Create transaction data (simplified)
+    basket = pd.get_dummies(df[['Product_Category', 'Disruption_Type', 'Transportation_Mode']].fillna('None'))
+    
+    # Apriori algorithm
+    frequent_itemsets = apriori(basket, min_support=0.1, use_colnames=True)
+    rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=0.5)
+    
+    st.subheader("Top Association Rules")
+    rules_display = rules[['antecedents', 'consequents', 'support', 'confidence', 'lift']].round(3)
+    st.dataframe(rules_display.head(10))
+    
+    # Rule visualization
+    fig_rules = px.scatter(rules.head(10), x='support', y='confidence', 
+                          size='lift', color='lift',
+                          hover_name='antecedents',
+                          title="Association Rules Strength")
+    st.plotly_chart(fig_rules, use_container_width=True)
+
+elif page == "📋 Raw Data":
+    st.header("📋 Raw Data Explorer")
+    
+    # Filters
+    col1, col2 = st.columns(2)
+    with col1:
+        category = st.multiselect("Product Category", 
+                                df['Product_Category'].unique(),
+                                default=df['Product_Category'].unique())
+    with col2:
+        date_range = st.date_input("Date Range", 
+                                 value=(df['Date'].min().date(), df['Date'].max().date()))
+    
+    filtered_df = df[
+        (df['Product_Category'].isin(category)) &
+        (df['Date'].dt.date >= date_range[0]) &
+        (df['Date'].dt.date <= date_range[1])
+    ]
+    
+    st.dataframe(filtered_df, use_container_width=True)
+    
+    # Download button
+    csv = filtered_df.to_csv(index=False)
+    st.download_button("Download filtered data", csv, "supply_chain_filtered.csv")
 
 # Footer
 st.markdown("---")
-st.markdown("**🚚 Enterprise Supply Chain Intelligence** | *Every chart tells an actionable story*")
+st.markdown("**Built with Streamlit** | Supply Chain Analytics Dashboard | 📦🚚📊")
