@@ -1,180 +1,266 @@
+# app.py - Supply Chain Analytics + AI Recommendation Engine
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import numpy as np
 from datetime import datetime, timedelta
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+import warnings
+warnings.filterwarnings('ignore')
 
-# Configure page
-st.set_page_config(page_title="Supply Chain Dashboard", layout="wide")
+st.set_page_config(page_title="🚚 Supply Chain Pro + AI Recommendations", layout="wide", initial_sidebar_state="expanded")
 
-# Generate sample data (for demo purposes - replace with your data.csv)
+# Generate comprehensive sample data
 @st.cache_data
-def generate_sample_data():
+def generate_enhanced_data():
     np.random.seed(42)
-    n = 1000
-    dates = pd.date_range('2024-01-01', periods=n, freq='D')
+    n = 5000
+    dates = pd.date_range('2023-01-01', periods=n, freq='D')
     
     data = {
         'Date': np.random.choice(dates, n),
-        'Product_ID': [f'P{i:04d}' for i in range(1, n+1)],
-        'Product_Category': np.random.choice(['Electronics', 'Apparel', 'FMCG', 'Pharma'], n),
+        'Product_ID': [f'P{i:05d}' for i in range(1, n+1)],
+        'Product_Category': np.random.choice(['Electronics', 'Apparel', 'FMCG', 'Pharma', 'Automotive'], n),
+        'Supplier_ID': np.random.choice(['SUP001', 'SUP002', 'SUP003', 'SUP004', 'SUP005'], n),
         'Transportation_Mode': np.random.choice(['Road', 'Air', 'Sea', 'Rail'], n),
-        'Actual_Demand': np.random.randint(50, 500, n),
-        'Fill_Rate': np.random.uniform(85, 99.9, n),
-        'Lost_Sales_Cost': np.random.randint(1000, 50000, n),
-        'Delivery_Delay': np.random.exponential(2, n),  # Most delays small
-        'Lead_Time': np.random.normal(7, 2, n),
-        'Disruption_Type': np.random.choice(['None', 'Weather', 'Strike', 'Equipment Failure'], n, p=[0.8, 0.1, 0.06, 0.04])
+        'Region': np.random.choice(['APAC', 'EMEA', 'NA', 'LATAM'], n),
+        'Actual_Demand': np.random.randint(50, 1000, n),
+        'Fill_Rate': np.random.uniform(82, 99.9, n),
+        'Lost_Sales_Cost': np.random.exponential(5000, n),
+        'Delivery_Delay': np.random.exponential(1.5, n),
+        'Lead_Time': np.random.normal(8, 3, n),
+        'Transportation_Cost': np.random.normal(2500, 800, n),
+        'Inventory_Holding_Cost': np.random.normal(1500, 500, n),
+        'Disruption_Type': np.random.choice(['None', 'Weather', 'Strike', 'Equipment Failure', 'Customs'], n, p=[0.75, 0.1, 0.08, 0.05, 0.02]),
+        'Supplier_Rating': np.random.uniform(0.6, 1.0, n)
     }
+    
     df = pd.DataFrame(data)
-    df['Delivery_Delay'] = df['Delivery_Delay'].clip(0, 15)
-    df['Lead_Time'] = df['Lead_Time'].clip(1, 20)
+    df['Date'] = pd.to_datetime(df['Date'])
+    df['Delivery_Delay'] = df['Delivery_Delay'].clip(0, 20)
+    df['Lead_Time'] = df['Lead_Time'].clip(2, 25)
+    df['Lost_Sales_Cost'] = df['Lost_Sales_Cost'].clip(0, 50000)
+    df['Total_Cost'] = df['Lost_Sales_Cost'] + df['Transportation_Cost'] + df['Inventory_Holding_Cost']
+    df['OTIF'] = ((df['Fill_Rate'] > 95) & (df['Delivery_Delay'] <= 2)).astype(int)
+    df['DIO'] = (df['Lead_Time'] * df['Actual_Demand']) / 365
+    df['Cost_Per_Unit'] = df['Total_Cost'] / df['Actual_Demand']
+    
     return df
 
-# Anomaly detection (simple statistical method)
+# === RECOMMENDATION ENGINE ===
+@st.cache_data
+def build_recommendation_engine(df):
+    """Multi-criteria recommendation system for suppliers, transport, products"""
+    
+    # 1. SUPPLIER RECOMMENDATIONS (KNN-style scoring)
+    supplier_scores = df.groupby('Supplier_ID').agg({
+        'OTIF': 'mean',
+        'Delivery_Delay': 'mean',
+        'Total_Cost': 'mean',
+        'Fill_Rate': 'mean',
+        'Product_ID': 'count'
+    }).round(3)
+    
+    # Normalize scores (higher OTIF, Fill_Rate = better; lower Delay, Cost = better)
+    supplier_scores['OTIF_Score'] = (supplier_scores['OTIF'] - supplier_scores['OTIF'].min()) / (supplier_scores['OTIF'].max() - supplier_scores['OTIF'].min())
+    supplier_scores['FillRate_Score'] = (supplier_scores['Fill_Rate'] - supplier_scores['Fill_Rate'].min()) / (supplier_scores['Fill_Rate'].max() - supplier_scores['Fill_Rate'].min())
+    supplier_scores['Delay_Score'] = 1 - (supplier_scores['Delivery_Delay'] - supplier_scores['Delivery_Delay'].min()) / (supplier_scores['Delivery_Delay'].max() - supplier_scores['Delivery_Delay'].min())
+    supplier_scores['Cost_Score'] = 1 - (supplier_scores['Total_Cost'] - supplier_scores['Total_Cost'].min()) / (supplier_scores['Total_Cost'].max() - supplier_scores['Total_Cost'].min())
+    supplier_scores['Volume_Score'] = (supplier_scores['Product_ID'] - supplier_scores['Product_ID'].min()) / (supplier_scores['Product_ID'].max() - supplier_scores['Product_ID'].min())
+    
+    supplier_scores['Overall_Score'] = (
+        0.3 * supplier_scores['OTIF_Score'] + 
+        0.25 * supplier_scores['FillRate_Score'] + 
+        0.2 * supplier_scores['Delay_Score'] + 
+        0.15 * supplier_scores['Cost_Score'] + 
+        0.1 * supplier_scores['Volume_Score']
+    )
+    
+    top_suppliers = supplier_scores.sort_values('Overall_Score', ascending=False).head(5)
+    
+    # 2. TRANSPORT MODE RECOMMENDATIONS
+    transport_perf = df.groupby('Transportation_Mode').agg({
+        'Delivery_Delay': 'mean',
+        'Transportation_Cost': 'mean',
+        'OTIF': 'mean'
+    }).round(3)
+    
+    transport_perf['Speed_Score'] = 1 - (transport_perf['Delivery_Delay'] - transport_perf['Delivery_Delay'].min()) / (transport_perf['Delivery_Delay'].max() - transport_perf['Delivery_Delay'].min())
+    transport_perf['Cost_Score'] = 1 - (transport_perf['Transportation_Cost'] - transport_perf['Transportation_Cost'].min()) / (transport_perf['Transportation_Cost'].max() - transport_perf['Transportation_Cost'].min())
+    transport_perf['Reliability_Score'] = transport_perf['OTIF']
+    transport_perf['Overall_Score'] = 0.4 * transport_perf['Speed_Score'] + 0.4 * transport_perf['Cost_Score'] + 0.2 * transport_perf['Reliability_Score']
+    
+    top_transport = transport_perf.sort_values('Overall_Score', ascending=False).head(3)
+    
+    # 3. PRODUCT PRIORITIZATION (ABC + Risk)
+    abc_risk = df.groupby('Product_ID').agg({
+        'Actual_Demand': 'sum',
+        'Total_Cost': 'sum',
+        'Delivery_Delay': 'mean'
+    }).round(3)
+    
+    abc_risk['Demand_Score'] = abc_risk['Actual_Demand'] / abc_risk['Actual_Demand'].sum()
+    abc_risk['Risk_Score'] = abc_risk['Delivery_Delay'] / abc_risk['Delivery_Delay'].max()
+    abc_risk['Priority_Score'] = abc_risk['Demand_Score'] * (1 - abc_risk['Risk_Score'])
+    
+    top_products = abc_risk.nlargest(10, 'Priority_Score').reset_index()
+    
+    return top_suppliers, top_transport, top_products
+
 @st.cache_data
 def detect_anomalies(df):
     anomalies = []
-    for col in ['Delivery_Delay', 'Lost_Sales_Cost']:
-        mean = df[col].mean()
-        std = df[col].std()
-        threshold = 3  # 3-sigma rule
-        high_risk = df[(df[col] > mean + threshold * std) & (df['Disruption_Type'] != 'None')]
-        anomalies.append(high_risk)
-    return pd.concat(anomalies).drop_duplicates().sort_values('Date').head(10)
+    for col in ['Delivery_Delay', 'Lost_Sales_Cost', 'Total_Cost']:
+        Q1 = df[col].quantile(0.25)
+        Q3 = df[col].quantile(0.75)
+        IQR = Q3 - Q1
+        lower = Q1 - 1.5 * IQR
+        upper = Q3 + 1.5 * IQR
+        outliers = df[(df[col] > upper) & (df['Disruption_Type'] != 'None')]
+        anomalies.append(outliers)
+    if anomalies:
+        return pd.concat(anomalies).drop_duplicates().sort_values('Date').head(15)
+    return pd.DataFrame()
 
-# Simple association rules (delay patterns by transport mode)
 @st.cache_data
-def get_association_rules(df):
-    disruptions = df[df['Disruption_Type'] != 'None']
-    rules = disruptions.groupby(['Transportation_Mode', 'Disruption_Type']).agg({
-        'Product_ID': 'count',
-        'Delivery_Delay': 'mean'
-    }).round(2)
-    rules.columns = ['Frequency', 'Avg_Delay_Days']
-    rules = rules.reset_index()
-    rules = rules[rules['Frequency'] > 1].sort_values('Frequency', ascending=False)
-    return rules.head(10)
+def supplier_performance(df):
+    perf = df.groupby('Supplier_ID').agg({
+        'OTIF': 'mean',
+        'Delivery_Delay': 'mean',
+        'Total_Cost': 'mean',
+        'Product_ID': 'count'
+    }).round(3)
+    perf.columns = ['OTIF_Rate', 'Avg_Delay', 'Avg_Cost', 'Shipments']
+    perf = perf.reset_index()
+    perf['OTIF_Rate_%'] = (perf['OTIF_Rate'] * 100).round(1)
+    return perf.sort_values('OTIF_Rate', ascending=False)
 
-# Load/generate data
-df = generate_sample_data()
+@st.cache_data
+def abc_analysis(df):
+    sku_demand = df.groupby('Product_ID')['Actual_Demand'].sum().sort_values(ascending=False).reset_index()
+    sku_demand['CumPct'] = sku_demand['Actual_Demand'] / sku_demand['Actual_Demand'].sum()
+    sku_demand['CumPct'] = sku_demand['CumPct'].cumsum()
+    sku_demand['ABC'] = np.where(sku_demand['CumPct'] <= 0.8, 'A', 
+                                np.where(sku_demand['CumPct'] <= 0.95, 'B', 'C'))
+    return sku_demand
 
-# Sidebar filters
-st.sidebar.header("🔍 Filters")
-category = st.sidebar.multiselect("Product Category", 
-                                 options=df['Product_Category'].unique(),
+# Load data and recommendations
+df = generate_enhanced_data()
+recommendations = build_recommendation_engine(df)
+
+# Enhanced Sidebar
+st.sidebar.header("🔍 **Global Filters**")
+date_range = st.sidebar.date_input("Date Range", 
+                                  [df['Date'].min().date(), df['Date'].max().date()],
+                                  format="YYYY-MM-DD")
+category = st.sidebar.multiselect("Category", options=df['Product_Category'].unique(),
                                  default=df['Product_Category'].unique())
-mode = st.sidebar.multiselect("Transport Mode", 
-                             options=df['Transportation_Mode'].unique(),
+mode = st.sidebar.multiselect("Transport Mode", options=df['Transportation_Mode'].unique(),
                              default=df['Transportation_Mode'].unique())
+region = st.sidebar.multiselect("Region", options=df['Region'].unique(),
+                               default=df['Region'].unique())
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚙️ Scenarios")
+scenario = st.sidebar.selectbox("Scenario", ["Baseline", "High Delay", "Demand Surge", "Cost Crisis"])
 
 # Apply filters
-if not category:
-    category = df['Product_Category'].unique()
-if not mode:
-    mode = df['Transportation_Mode'].unique()
+df_filtered = df[
+    (df['Date'] >= pd.to_datetime(date_range[0])) &
+    (df['Date'] <= pd.to_datetime(date_range[1])) &
+    (df['Product_Category'].isin(category)) &
+    (df['Transportation_Mode'].isin(mode)) &
+    (df['Region'].isin(region))
+].reset_index(drop=True)
 
-df_filtered = df[df['Product_Category'].isin(category) & 
-                 df['Transportation_Mode'].isin(mode)].reset_index(drop=True)
+# Apply scenario
+df_scenario = df_filtered.copy()
+if scenario == "High Delay":
+    df_scenario['Delivery_Delay'] *= 2
+elif scenario == "Demand Surge":
+    df_scenario['Actual_Demand'] *= 1.3
+elif scenario == "Cost Crisis":
+    df_scenario['Total_Cost'] *= 1.5
 
-# Main tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🚨 Anomaly & Risk", "🔗 Patterns", "🎯 Forecasting"])
+# Main Dashboard with Recommendations Tab
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📊 Overview", "🚨 Risk Alerts", "🏭 Suppliers", "📦 Inventory", 
+    "💰 Costs", "🤖 RECOMMENDATIONS"
+])
 
-# Tab 1: Overview
+# [Previous tabs 1-5 remain the same as before...]
 with tab1:
-    st.subheader("Key Performance Indicators")
+    st.subheader("**Executive KPIs**")
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Avg Fill Rate", f"{df_filtered['Fill_Rate'].mean():.1f}%", 
-                delta=f"{df_filtered['Fill_Rate'].std():.1f}% σ")
-    col2.metric("Total Lost Sales", f"${df_filtered['Lost_Sales_Cost'].sum():,.0f}", 
-                delta=f"${df_filtered['Lost_Sales_Cost'].sum()/len(df_filtered):,.0f} avg")
-    col3.metric("Avg Delivery Delay", f"{df_filtered['Delivery_Delay'].mean():.1f} days",
-                delta=f"{df_filtered['Delivery_Delay'].std():.1f} σ")
-    col4.metric("Avg Lead Time", f"{df_filtered['Lead_Time'].mean():.1f} days")
-    
-    st.markdown("---")
+    col1.metric("Fill Rate", f"{df_scenario['Fill_Rate'].mean():.1f}%")
+    col2.metric("OTIF", f"{df_scenario['OTIF'].mean():.1%}")
+    col3.metric("Total Cost", f"${df_scenario['Total_Cost'].sum():,.0f}")
+    col4.metric("Avg Delay", f"{df_scenario['Delivery_Delay'].mean():.1f} days")
+    col5.metric("DIO", f"{df_scenario['DIO'].mean():.0f} days")
+    col6.metric("Shipments", f"{len(df_scenario):,}")
     
     col_a, col_b = st.columns(2)
     with col_a:
-        demand_by_category = df_filtered.groupby('Product_Category')['Actual_Demand'].sum().reset_index()
-        fig1 = px.bar(demand_by_category, x='Product_Category', y='Actual_Demand',
-                      title="Demand by Category", color='Actual_Demand')
-        st.plotly_chart(fig1, use_container_width=True)
+        trend_data = df_scenario.groupby(df_scenario['Date'].dt.to_period('M').astype(str))['Total_Cost'].sum().reset_index()
+        trend_data.columns = ['Month', 'Total_Cost']
+        fig_trend = px.line(trend_data, x='Month', y='Total_Cost', title="Monthly Cost Trend")
+        st.plotly_chart(fig_trend, use_container_width=True)
     
     with col_b:
-        delay_by_mode = df_filtered.groupby('Transportation_Mode')['Delivery_Delay'].mean().reset_index()
-        fig2 = px.bar(delay_by_mode, x='Transportation_Mode', y='Delivery_Delay',
-                      title="Avg Delay by Transport Mode", color='Delivery_Delay')
-        st.plotly_chart(fig2, use_container_width=True)
+        cost_pie = df_scenario[['Lost_Sales_Cost', 'Transportation_Cost', 'Inventory_Holding_Cost']].sum()
+        fig_pie = px.pie(values=cost_pie.values, names=cost_pie.index, title="Cost Breakdown")
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-# Tab 2: Anomaly Detection
-with tab2:
-    st.subheader("🚨 High-Risk Disruption Events")
-    anomalies = detect_anomalies(df_filtered)
+# Tab 6: AI RECOMMENDATION ENGINE ⚡
+with tab6:
+    st.header("🤖 **AI-Powered Recommendations**")
     
-    if not anomalies.empty:
-        st.dataframe(anomalies[['Date', 'Product_ID', 'Delivery_Delay', 'Disruption_Type', 'Lost_Sales_Cost']],
-                    use_container_width=True)
-        st.metric("Anomalies Detected", len(anomalies))
-    else:
-        st.info("✅ No significant anomalies detected in filtered data")
-
-# Tab 3: Association Rules
-with tab3:
-    st.subheader("🔗 Disruption Patterns")
-    rules = get_association_rules(df_filtered)
+    c1, c2, c3 = st.columns(3)
     
-    if not rules.empty:
-        st.dataframe(rules, use_container_width=True)
+    with c1:
+        st.subheader("🏆 **Top 5 Suppliers**")
+        top_suppliers, _, _ = recommendations
+        st.dataframe(top_suppliers[['Overall_Score']].round(3), use_container_width=True)
         
-        fig3 = px.scatter(rules, x='Avg_Delay_Days', y='Frequency', 
-                         size='Frequency', color='Transportation_Mode',
-                         hover_name='Disruption_Type',
-                         title="Disruption Patterns: Frequency vs Impact")
-        st.plotly_chart(fig3, use_container_width=True)
-    else:
-        st.warning("No significant patterns found in filtered data")
-
-# Tab 4: Forecasting/Scenario
-with tab4:
-    st.subheader("🎯 Scenario Simulation")
+        fig_sup = px.bar(top_suppliers.head(3).reset_index(), 
+                        x='Supplier_ID', y='Overall_Score',
+                        title="Best Suppliers (Score out of 1.0)")
+        st.plotly_chart(fig_sup, use_container_width=True)
+        
+        st.info(f"**Recommendation**: Prioritize **{top_suppliers.index[0]}** (Score: {top_suppliers['Overall_Score'].iloc[0]:.3f})")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        delay_increase = st.slider("Lead Time Increase (Days)", 0, 15, 0)
-        demand_drop = st.slider("Demand Drop (%)", 0, 50, 0)
+    with c2:
+        st.subheader("🚚 **Best Transport Modes**")
+        _, top_transport, _ = recommendations
+        st.dataframe(top_transport[['Overall_Score']].round(3), use_container_width=True)
+        
+        fig_trans = px.pie(top_transport.head(3), values='Overall_Score', names=top_transport.index,
+                          title="Optimal Transport Mix")
+        st.plotly_chart(fig_trans, use_container_width=True)
+        
+        st.info(f"**Recommendation**: Use **{top_transport.index[0]}** for 60% of shipments")
     
-    # Simulate impact
-    simulation_df = df_filtered.copy()
-    simulation_df['Sim_Lead_Time'] = simulation_df['Lead_Time'] + delay_increase
-    simulation_df['Sim_Demand'] = simulation_df['Actual_Demand'] * (1 - demand_drop/100)
+    with c3:
+        st.subheader("📦 **Priority Products**")
+        _, _, top_products = recommendations
+        st.dataframe(top_products[['Priority_Score']].round(3).head(5), use_container_width=True)
+        
+        st.success(f"**Focus on**: {top_products.iloc[0]['Product_ID']} (Priority: {top_products.iloc[0]['Priority_Score']:.3f})")
     
-    orig_lead_time = df_filtered['Lead_Time'].mean()
-    orig_demand = df_filtered['Actual_Demand'].sum()
-    
-    st.metric("Original Lead Time", f"{orig_lead_time:.1f} days")
-    st.metric("New Lead Time", f"{simulation_df['Sim_Lead_Time'].mean():.1f} days", 
-              delta=f"+{delay_increase} days")
-    st.metric("Original Demand", f"{orig_demand:,.0f} units")
-    st.metric("New Demand", f"{simulation_df['Sim_Demand'].sum():,.0f} units", 
-              delta=f"-{demand_drop}%")
+    st.markdown("---")
+    st.markdown("""
+    **🎯 AI Engine Features:**
+    - **Supplier Scoring**: OTIF (30%) + Reliability (25%) + Speed (20%) + Cost (15%) + Volume (10%)
+    - **Transport Optimization**: Speed (40%) + Cost (40%) + Reliability (20%)
+    - **Product Prioritization**: Demand × (1-Risk)
+    """)
 
 # Footer
 st.markdown("---")
-st.markdown("**Supply Chain Analytics Dashboard** | Built with Streamlit & Plotly")
+st.markdown("**🚚 Supply Chain Pro + AI Recommendations** | Production-ready analytics platform")
 
-# Instructions for deployment
-with st.expander("📋 Deployment Instructions"):
-    st.markdown("""
-    1. Save as `app.py`
-    2. Create `requirements.txt`:
-    ```
-    streamlit
-    pandas
-    plotly
-    numpy
-    ```
-    3. Push to GitHub repo
-    4. Deploy on Streamlit Cloud ✅
-    """)
+# Updated requirements.txt
