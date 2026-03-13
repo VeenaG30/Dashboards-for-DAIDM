@@ -14,11 +14,11 @@ if theme == "Dark":
 def load_data():
     try:
         # Attempt to read with semicolon, fallback to comma
-        df = pd.read_csv("supply_chain_data.csv", sep=';')
+        df = pd.read_csv("data.csv", sep=';')
         
         # If only one column was read, it means the separator was wrong
         if len(df.columns) == 1:
-            df = pd.read_csv("supply_chain_data.csv", sep=',')
+            df = pd.read_csv("data.csv", sep=',')
             
         # CRITICAL: Clean column names (remove leading/trailing spaces/newlines)
         df.columns = df.columns.str.strip()
