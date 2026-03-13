@@ -12,11 +12,22 @@ if theme == "Dark":
 # --- LOAD DATA ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv("Supply_Chain_Data.csv", sep=';')
-    df['Date'] = pd.to_datetime(df['Date'])
+    # Try reading with semicolon, if that fails, try comma
+    try:
+        df = pd.read_csv("Supply_Chain_Data.csv", sep=';')
+        # Clean whitespace from headers
+        df.columns = df.columns.str.strip()
+    except:
+        df = pd.read_csv("Supply_Chain_Data.csv", sep=',')
+        df.columns = df.columns.str.strip()
+        
+    # Convert Date column
+    if 'Date' in df.columns:
+        df['Date'] = pd.to_datetime(df['Date'])
+    else:
+        st.error(f"Could not find 'Date' column. Available columns: {df.columns.tolist()}")
+        
     return df
-
-df = load_data()
 
 st.title("🌐 Supply Chain Decision Support System")
 
