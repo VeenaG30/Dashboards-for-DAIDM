@@ -79,5 +79,3 @@ with tab3:
     st.dataframe(filtered_df[['Date', 'Product_ID', 'Disruption_Type', 'Warehouse_Zone', 'Lost_Sales_Cost']].head(10))
     st.caption(f"Total rows: {len(filtered_df)} | Columns: {list(df.columns)}")
 
-st.markdown("---")
-st.caption("✅ **Crash-proof version for MBA submission**")
