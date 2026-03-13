@@ -1,10 +1,22 @@
+"""
+Supply Chain Analytics Dashboard - Updated requirements.txt
+Dark Mode + Fixed Navigation + ML Analytics
+"""
+
+# Core Framework
 streamlit>=1.38.0
+
+# Data Processing
 pandas>=2.0.0
 numpy>=1.24.0
-plotly>=5.20.0
+pyarrow>=15.0.0
+
+# Machine Learning
 scikit-learn>=1.4.0
 mlxtend>=0.23.0
-seaborn>=0.13.0
-matplotlib>=3.8.0
+
+# Visualizations
+plotly>=5.20.0
+
+# Optional (for better performance)
 altair>=5.3.0
-pyarrow>=15.0.0
